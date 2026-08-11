@@ -1,7 +1,7 @@
 """
-FaceSwap Standalone (A100 GPU Accelerated) — imLeGEnDco +FlowCode Dept.
+FaceSwap Standalone (Image & Video · A100 GPU Accelerated) — imLeGEnDco +FlowCode Dept.
 
-Ultra-simplified, pure Python face swapping app powered by InsightFace,
+Ultra-fast, pure Python face swapping app for Images and Videos powered by InsightFace,
 INSwapper 128 (built-in paste back) and GPEN-BFR 512 face restoration.
 
 GitHub: https://github.com/imLeGEnDco55/FaceSwap
@@ -11,10 +11,13 @@ import os
 import sys
 import glob
 import ctypes
+import subprocess
 import tempfile
 import types
 import cv2
 import numpy as np
+import imageio
+import imageio_ffmpeg
 
 # ── Pre-load CUDA & cuDNN libraries for ONNX Runtime ─────────────────────────
 try:
@@ -164,9 +167,28 @@ def apply_gpen_restore(target_img, target_face, strength=0.7):
     result_float = target_float * (1.0 - warped_mask) + warped_face * warped_mask
     return (result_float * 255.0).clip(0, 255).astype(np.uint8)
 
-# ── Main Process Function ────────────────────────────────────────────────────
+def _mux_audio(silent_video_path, source_video_path):
+    output_path = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [
+        ffmpeg, "-y",
+        "-i", silent_video_path,
+        "-i", source_video_path,
+        "-map", "0:v:0",
+        "-map", "1:a:0?",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-shortest",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return silent_video_path
+    return output_path
+
+# ── Image Face Swap ──────────────────────────────────────────────────────────
 @spaces.GPU()
-def process_faceswap(
+def process_image_faceswap(
     source_path: str,
     target_path: str,
     target_index: int = 0,
@@ -201,62 +223,152 @@ def process_faceswap(
         target_index = 0
     target_face = target_faces[target_index]
 
-    # Perform INSwapper 128 face swap with native built-in paste back
     swapped_bgr = swapper.get(target_bgr, target_face, source_face, paste_back=True)
 
-    # Apply GPEN 512 face restoration if strength > 0
     if restore_strength > 0:
         swapped_bgr = apply_gpen_restore(swapped_bgr, target_face, strength=restore_strength)
 
-    # Save to explicit PNG file
     result_rgb = cv2.cvtColor(swapped_bgr, cv2.COLOR_BGR2RGB)
     pil_out = Image.fromarray(result_rgb)
     tmp = tempfile.NamedTemporaryFile(suffix="_faceswap.png", delete=False)
     pil_out.save(tmp.name, format="PNG", compress_level=1)
     return tmp.name
 
-# ── Minimal UI ───────────────────────────────────────────────────────────────
+# ── Video Face Swap ──────────────────────────────────────────────────────────
+@spaces.GPU()
+def process_video_faceswap(
+    source_path: str,
+    video_path: str,
+    target_index: int = 0,
+    restore_strength: float = 0.7,
+    progress=gr.Progress(track_tqdm=True)
+):
+    if not source_path or not video_path:
+        raise gr.Error("Upload both Source (Face) image and Target Video.")
+
+    app = get_face_app()
+    swapper = get_swapper()
+
+    source_bgr = cv2.imread(source_path)
+    if source_bgr is None:
+        raise gr.Error("Error reading Source face image.")
+
+    source_faces = app.get(source_bgr)
+    if not source_faces:
+        raise gr.Error("No face detected in the Source image.")
+
+    source_faces = sorted(source_faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
+    source_face = source_faces[0]
+
+    reader = imageio.get_reader(video_path, "ffmpeg")
+    meta = reader.get_meta_data()
+    fps = meta.get("fps", 24) or 24
+
+    silent_path = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
+    writer = imageio.get_writer(silent_path, fps=fps, codec="libx264", quality=8, macro_block_size=None)
+
+    try:
+        for i, frame in enumerate(reader):
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            target_faces = app.get(frame_bgr)
+
+            if target_faces:
+                target_faces = sorted(target_faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
+                idx = target_index if target_index < len(target_faces) else 0
+                target_face = target_faces[idx]
+
+                swapped_bgr = swapper.get(frame_bgr, target_face, source_face, paste_back=True)
+                if restore_strength > 0:
+                    swapped_bgr = apply_gpen_restore(swapped_bgr, target_face, strength=restore_strength)
+                
+                frame_out = cv2.cvtColor(swapped_bgr, cv2.COLOR_BGR2RGB)
+            else:
+                frame_out = frame
+
+            writer.append_data(frame_out)
+    finally:
+        reader.close()
+        writer.close()
+
+    return _mux_audio(silent_path, video_path)
+
+# ── Gradio UI ────────────────────────────────────────────────────────────────
 title_html = """
 <div style="text-align: center; max-width: 800px; margin: 0 auto; padding: 10px;">
-    <h2 style="color: #6366f1; font-weight: 700; margin-bottom: 4px;">⚡ FaceSwap (INSwapper 128 + GPEN 512)</h2>
-    <p style="color: #666; font-size: 0.95rem; margin: 0;">Fast & direct face swapping powered by CUDA GPU acceleration</p>
+    <h2 style="color: #6366f1; font-weight: 700; margin-bottom: 4px;">⚡ FaceSwap (Image & Video · A100 GPU Accelerated)</h2>
+    <p style="color: #666; font-size: 0.95rem; margin: 0;">Fast & direct face swapping powered by InsightFace & GPEN 512</p>
 </div>
 """
 
 with gr.Blocks(theme=gr.themes.Soft(primary_hue="indigo")) as app:
     gr.HTML(title_html)
     
-    with gr.Row():
-        with gr.Column():
+    with gr.Tabs():
+        with gr.Tab("📷 Image FaceSwap"):
             with gr.Row():
-                with gr.Group():
-                    source_image = gr.Image(label="Source (Face)", type="filepath")
-                    restore_strength = gr.Slider(
-                        minimum=0.0, 
-                        maximum=1.0, 
-                        step=0.05, 
-                        value=0.7, 
-                        label="Face Restore Strength (GPEN 512)"
-                    )
+                with gr.Column():
+                    with gr.Row():
+                        with gr.Group():
+                            source_img = gr.Image(label="Source (Face)", type="filepath")
+                            restore_str_img = gr.Slider(
+                                minimum=0.0, 
+                                maximum=1.0, 
+                                step=0.05, 
+                                value=0.7, 
+                                label="Face Restore Strength (GPEN 512)"
+                            )
 
-                with gr.Group():
-                    target_image = gr.Image(label="Target (Body)", type="filepath")
-                    target_index = gr.Dropdown(
-                        choices=[0, 1, 2, 3, 4], 
-                        value=0, 
-                        label="Target Face Index"
-                    )
-                    gr.Markdown("Index 0 = Largest Face. Choose 1, 2, 3, etc. for other target faces.")
-                    generate_btn = gr.Button("⚡ Swap Face!", variant="primary", size="lg")
+                        with gr.Group():
+                            target_img = gr.Image(label="Target (Body)", type="filepath")
+                            target_idx_img = gr.Dropdown(
+                                choices=[0, 1, 2, 3, 4], 
+                                value=0, 
+                                label="Target Face Index"
+                            )
+                            gr.Markdown("Index 0 = Largest Face. Choose 1, 2, 3, etc. for other target faces.")
+                            btn_img = gr.Button("⚡ Swap Image Face!", variant="primary", size="lg")
 
-        with gr.Column():
-            output_image = gr.Image(label="Swapped Result", format="png")
+                with gr.Column():
+                    output_img = gr.Image(label="Swapped Result", format="png")
 
-    generate_btn.click(
-        fn=process_faceswap,
-        inputs=[source_image, target_image, target_index, restore_strength],
-        outputs=[output_image]
-    )
+            btn_img.click(
+                fn=process_image_faceswap,
+                inputs=[source_img, target_img, target_idx_img, restore_str_img],
+                outputs=[output_img]
+            )
+
+        with gr.Tab("🎬 Video FaceSwap"):
+            with gr.Row():
+                with gr.Column():
+                    with gr.Row():
+                        with gr.Group():
+                            source_vid_face = gr.Image(label="Source (Face)", type="filepath")
+                            restore_str_vid = gr.Slider(
+                                minimum=0.0, 
+                                maximum=1.0, 
+                                step=0.05, 
+                                value=0.7, 
+                                label="Face Restore Strength (GPEN 512)"
+                            )
+
+                        with gr.Group():
+                            target_vid = gr.Video(label="Target Video")
+                            target_idx_vid = gr.Dropdown(
+                                choices=[0, 1, 2, 3, 4], 
+                                value=0, 
+                                label="Target Face Index"
+                            )
+                            gr.Markdown("Index 0 = Largest Face. Choose 1, 2, 3, etc. for other target faces.")
+                            btn_vid = gr.Button("⚡ Swap Video Face!", variant="primary", size="lg")
+
+                with gr.Column():
+                    output_vid = gr.Video(label="Swapped Video Result")
+
+            btn_vid.click(
+                fn=process_video_faceswap,
+                inputs=[source_vid_face, target_vid, target_idx_vid, restore_str_vid],
+                outputs=[output_vid]
+            )
 
 if __name__ == "__main__":
     app.launch(share=True)

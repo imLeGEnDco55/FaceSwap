@@ -1,17 +1,18 @@
-# FaceSwap ⚡ (INSwapper 128 + GPEN 512)
+# FaceSwap ⚡ (Image & Video · INSwapper 128 + GPEN 512)
 
-Ultra-fast, lightweight, pure-Python face swapping application powered by **InsightFace (INSwapper 128)**, **GPEN (512x512)** face restoration, and **ONNX CUDA Execution Provider**.
+Ultra-fast, lightweight, pure-Python face swapping application for **Images and Videos**, powered by **InsightFace (INSwapper 128)**, **GPEN (512x512)** face restoration, and **ONNX CUDA Execution Provider**.
 
 Designed by **imLeGEnDco +FlowCode Department**.
 
 ---
 
 ## ✨ Features
-- **Zero ComfyUI Dependencies:** Minimalist Gradio app in pure Python.
-- **A100 / L4 / T4 CUDA Acceleration:** Powered by `CUDAExecutionProvider` for sub-second face swaps.
-- **Native Paste-Back:** Exact face placement powered by InsightFace native alignment.
-- **High-Resolution Face Restoration:** Sharpen faces up to 512x512 with `GPEN-BFR-512.onnx`.
-- **Lossless PNG Export:** Automatically exports `.png` files for easy downloading.
+- **Zero ComfyUI Dependencies:** Standalone Gradio app in pure Python.
+- **Image & Video Support:** Swap faces on static photos or full video clips.
+- **Audio Preservation:** Video output retains the original audio track seamlessly.
+- **A100 / L4 / T4 CUDA Acceleration:** Sub-second image swaps and ~10ms per frame video processing.
+- **Native Paste-Back:** Pixel-perfect face placement powered by InsightFace.
+- **Lossless PNG Export:** Images download natively with `.png` extension.
 
 ---
 
