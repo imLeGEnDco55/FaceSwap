@@ -132,19 +132,21 @@ def create_oval_mask(crop_size=256):
 
 def paste_back_hyperswap(target_img, swapped_face_256, M):
     h, w = target_img.shape[:2]
+    IM = cv2.invertAffineTransform(M)
+
     mask_256 = create_oval_mask(256)
     mask_3c = np.stack([mask_256] * 3, axis=2)
 
     swapped_norm = swapped_face_256.astype(np.float32) / 255.0
 
     warped_face = cv2.warpAffine(
-        swapped_norm, M, (w, h),
-        flags=cv2.INTER_LANCZOS4 | cv2.WARP_INVERSE_MAP,
+        swapped_norm, IM, (w, h),
+        flags=cv2.INTER_LANCZOS4,
         borderMode=cv2.BORDER_CONSTANT, borderValue=0.5
     )
     warped_mask = cv2.warpAffine(
-        mask_3c, M, (w, h),
-        flags=cv2.INTER_CUBIC | cv2.WARP_INVERSE_MAP,
+        mask_3c, IM, (w, h),
+        flags=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_CONSTANT, borderValue=0.0
     )
 
