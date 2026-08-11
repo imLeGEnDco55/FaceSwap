@@ -260,15 +260,22 @@ def process_video_faceswap(
     source_faces = sorted(source_faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
     source_face = source_faces[0]
 
+    print("[faceswap] Reading video and prefetching frames into System RAM ...", flush=True)
     reader = imageio.get_reader(video_path, "ffmpeg")
     meta = reader.get_meta_data()
     fps = meta.get("fps", 24) or 24
 
+    # Prefetch all frames to System RAM for maximum speed
+    raw_frames = [frame for frame in reader]
+    reader.close()
+    total_frames = len(raw_frames)
+
     silent_path = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
     writer = imageio.get_writer(silent_path, fps=fps, codec="libx264", quality=8, macro_block_size=None)
 
+    print(f"[faceswap] Processing {total_frames} video frames on CUDA ...", flush=True)
     try:
-        for i, frame in enumerate(reader):
+        for i, frame in enumerate(progress.tqdm(raw_frames, desc="Swapping video faces")):
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             target_faces = app.get(frame_bgr)
 
@@ -287,7 +294,6 @@ def process_video_faceswap(
 
             writer.append_data(frame_out)
     finally:
-        reader.close()
         writer.close()
 
     return _mux_audio(silent_path, video_path)
