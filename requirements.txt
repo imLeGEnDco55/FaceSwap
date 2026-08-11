@@ -1,0 +1,11 @@
+torch
+torchvision
+numpy>=1.25.0
+opencv-python>=4.7.0
+Pillow
+insightface==0.7.3
+onnx>=1.14.0
+onnxruntime-gpu
+gradio>=4.0.0
+huggingface_hub
+spaces
