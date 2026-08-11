@@ -9,13 +9,30 @@ GitHub: https://github.com/imLeGEnDco55/FaceSwap
 
 import os
 import sys
+import glob
 import math
+import ctypes
 import tempfile
 import types
 from typing import Optional, List, Tuple
 import cv2
 import numpy as np
-import torch
+
+# ── Pre-load CUDA & cuDNN libraries for ONNX Runtime ─────────────────────────
+try:
+    import torch
+    torch_dir = os.path.dirname(torch.__file__)
+    site_dir = os.path.dirname(torch_dir)
+    nvidia_dir = os.path.join(site_dir, "nvidia")
+    if os.path.exists(nvidia_dir):
+        for lib_path in glob.glob(os.path.join(nvidia_dir, "*", "lib", "*.so*")):
+            try:
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+            except Exception:
+                pass
+except Exception as exc:
+    print(f"[faceswap] CUDA library preload notice: {exc}")
+
 import onnxruntime as ort
 from PIL import Image
 from huggingface_hub import hf_hub_download
@@ -47,14 +64,26 @@ from insightface.app import FaceAnalysis
 PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if torch.cuda.is_available() else ["CPUExecutionProvider"]
 print(f"[faceswap] GPU CUDA Status: {'⚡ CUDA ACTIVE (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else '⚠️ CPU MODE'}", flush=True)
 
-# ── Download Models ───────────────────────────────────────────────────────────
-print("[faceswap] Downloading required ONNX models ...", flush=True)
-hf_hub_download(repo_id="ezioruan/inswapper_128.onnx", filename="inswapper_128.onnx", local_dir="models/swapper")
-hf_hub_download(repo_id="martintomov/comfy", filename="facerestore_models/GPEN-BFR-512.onnx", local_dir="models/restorer")
+# ── Download Models & Store Exact File Paths ─────────────────────────────────
+MODEL_PATHS = {}
 
-hf_hub_download(repo_id="facefusion/models-3.3.0", filename="hyperswap_1a_256.onnx", local_dir="models/swapper")
-hf_hub_download(repo_id="facefusion/models-3.3.0", filename="hyperswap_1b_256.onnx", local_dir="models/swapper")
-hf_hub_download(repo_id="facefusion/models-3.3.0", filename="hyperswap_1c_256.onnx", local_dir="models/swapper")
+print("[faceswap] Downloading required ONNX models ...", flush=True)
+MODEL_PATHS["inswapper_128.onnx"] = hf_hub_download(
+    repo_id="ezioruan/inswapper_128.onnx", filename="inswapper_128.onnx", local_dir="models/swapper"
+)
+MODEL_PATHS["GPEN-BFR-512.onnx"] = hf_hub_download(
+    repo_id="martintomov/comfy", filename="facerestore_models/GPEN-BFR-512.onnx", local_dir="models/restorer"
+)
+
+MODEL_PATHS["hyperswap_1a_256.onnx"] = hf_hub_download(
+    repo_id="facefusion/models-3.3.0", filename="hyperswap_1a_256.onnx", local_dir="models/swapper"
+)
+MODEL_PATHS["hyperswap_1b_256.onnx"] = hf_hub_download(
+    repo_id="facefusion/models-3.3.0", filename="hyperswap_1b_256.onnx", local_dir="models/swapper"
+)
+MODEL_PATHS["hyperswap_1c_256.onnx"] = hf_hub_download(
+    repo_id="facefusion/models-3.3.0", filename="hyperswap_1c_256.onnx", local_dir="models/swapper"
+)
 
 hf_hub_download(repo_id="MonsterMMORPG/tools", filename="1k3d68.onnx", local_dir="models/insightface/models/buffalo_l")
 hf_hub_download(repo_id="MonsterMMORPG/tools", filename="2d106det.onnx", local_dir="models/insightface/models/buffalo_l")
@@ -130,7 +159,8 @@ def paste_back_hyperswap(target_img, swapped_face_256, M):
 def restore_gpen(face_img_512, strength=0.7):
     if strength <= 0:
         return face_img_512
-    session = get_onnx_session("models/restorer/GPEN-BFR-512.onnx")
+    gpen_path = MODEL_PATHS.get("GPEN-BFR-512.onnx")
+    session = get_onnx_session(gpen_path)
     img = cv2.resize(face_img_512, (512, 512))
     img_t = img[:, :, ::-1].astype(np.float32) / 255.0
     img_t = (img_t - 0.5) / 0.5
@@ -170,7 +200,6 @@ def process_faceswap(
     if not source_faces:
         raise gr.Error("No face detected in the Source image.")
 
-    # Sort source faces by size (largest face first)
     source_faces = sorted(source_faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
     source_face = source_faces[0]
 
@@ -178,18 +207,19 @@ def process_faceswap(
     if not target_faces:
         raise gr.Error("No faces detected in the Target image.")
 
-    # Sort target faces by size (largest face first)
     target_faces = sorted(target_faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
     
     if target_index >= len(target_faces):
         target_index = 0
     target_face = target_faces[target_index]
 
-    model_path = os.path.join("models/swapper", swap_model_name)
+    model_path = MODEL_PATHS.get(swap_model_name)
+    if not model_path or not os.path.exists(model_path):
+        raise gr.Error(f"Model file {swap_model_name} not found.")
+
     session = get_onnx_session(model_path)
 
     if "hyperswap" in swap_model_name:
-        # Hyperswap 256 pipeline
         source_emb = source_face.normed_embedding.reshape(1, -1).astype(np.float32)
         landmarks = target_face.kps.astype(np.float32)
 
@@ -215,11 +245,9 @@ def process_faceswap(
         result_bgr = paste_back_hyperswap(target_bgr, swapped_256, M)
 
     else:
-        # INSwapper 128 pipeline
         swapper = insightface.model_zoo.get_model(model_path, providers=PROVIDERS)
         result_bgr = swapper.get(target_bgr, target_face, source_face, paste_back=True)
         if face_restore_model == "GPEN-BFR-512.onnx":
-            # Restore full image face region
             landmarks = target_face.kps.astype(np.float32)
             M, _ = cv2.estimateAffinePartial2D(landmarks, STD_LANDMARKS_256)
             crop = cv2.warpAffine(result_bgr, M, (512, 512), flags=cv2.INTER_CUBIC)
