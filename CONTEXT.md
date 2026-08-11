@@ -1,37 +1,45 @@
-# CONTEXT — FaceSwap Standalone · imLeGEnDco +FlowCode Dept.
+# CONTEXT — FaceSwap Standalone (INSwapper 128 + GPEN 512) · imLeGEnDco +FlowCode Dept.
 
-> Última actualización: 2026-08-10 · Estado: **PRODUCCIÓN / STANDALONE PURA**
+> Última actualización: 2026-08-10 · Estado: **PRODUCCIÓN / SIMPLIFICADA AL MÁXIMO**
 
 ---
 
 ## 🎯 ESTADO ACTUAL
 
-Aplicación Gradio **Standalone pura en Python** (100% libre de ComfyUI) para FaceSwap rápido impulsado por `InsightFace`, `Hyperswap 256`, `INSwapper 128` y `GPEN 512`.
+Aplicación Gradio ultra-simplificada para intercambio de rostros usando **`inswapper_128.onnx`** (con paste-back nativo de InsightFace) y **`GPEN-BFR-512.onnx`** para la restauración de nitidez facial en GPU A100 / L4 / T4.
 
-### ⚡ Aceleración GPU A100:
-- Utiliza `CUDAExecutionProvider` de ONNX Runtime para ejecutar la detección y el intercambio directo en los Tensor Cores de la A100.
-- Tiempo de intercambio por rostro: **~0.05 - 0.15 segundos**.
-- Genera exportaciones nativas `.png` para descargas directas sin pérdida.
+### ⚙️ Interfaz y Parámetros:
+- **`Source (Face)`**: Imagen con el rostro a transplantar.
+- **`Target (Body)`**: Imagen objetivo.
+- **`Target Face Index`**: Índice del rostro a reemplazar (0 = rostro más grande).
+- **`Face Restore Strength (GPEN 512)`**: Slider de restauración facial (0.0 a 1.0, por defecto 0.7).
+
+### ⚡ Solución para Colab CUDA 12.x:
+- `requirements.txt` fijado con **`onnxruntime-gpu==1.19.2`** para resolver la compatibilidad de librerías dinámicas CUDA 12 (`libcublasLt.so`).
+- Paste-back nativo de InsightFace para posicionamiento exacto sin distorsión de coordenadas.
 
 ---
 
-## 📁 ESTRUCTURA DEL PROYECTO
+## 📁 ARCHIVOS
 
 | Archivo | Descripción |
 |---|---|
-| `app.py` | Aplicación Gradio standalone pura en Python (InsightFace + ONNX CUDA + GPEN + Gradio) |
-| `requirements.txt` | Dependencias limpias de PyTorch, InsightFace y ONNX Runtime GPU |
-| `README.md` | Documentación oficial para el repositorio GitHub `imLeGEnDco55/FaceSwap` |
+| `app.py` | App Gradio minimalista (INSwapper 128 + GPEN 512 + CUDA ONNX) |
+| `requirements.txt` | Dependencias limpias con `onnxruntime-gpu==1.19.2` |
+| `README.md` | Documentación oficial del repositorio |
 
 ---
 
-## 🚀 COMANDOS GIT PARA SUBIR A GITHUB
+## 🚀 INSTRUCCIONES PARA COLAB
 
 ```bash
-git init
-git add .
-git commit -m "feat: Standalone A100 CUDA FaceSwap application"
-git branch -M main
-git remote add origin https://github.com/imLeGEnDco55/FaceSwap.git
-git push -u origin main
+# 1. Clonar
+!git clone https://github.com/imLeGEnDco55/FaceSwap
+%cd FaceSwap
+
+# 2. Instalar dependencias GPU
+!pip install -r requirements.txt
+
+# 3. Lanzar
+!python app.py
 ```
